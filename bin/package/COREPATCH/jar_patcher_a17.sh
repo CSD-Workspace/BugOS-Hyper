@@ -15,6 +15,9 @@ BACKUP_DIR="$WORK_DIR/backup"
 SCRIPT_DIR="$work_dir/bin/package/COREPATCH"
 TOOLS_DIR="$work_dir/bin/apktool"
 source "${SCRIPT_DIR}/helper.sh"
+
+# SecureShot: cho phép chụp màn hình ở cửa sổ FLAG_SECURE
+source "${SCRIPT_DIR}/secure_windows.sh"
 # Create backup directory
 mkdir -p "$BACKUP_DIR"
 
@@ -1108,8 +1111,10 @@ FIELDS = [
 ]
 n = 0
 for f in FIELDS:
-    pat = re.compile(r"^\.field public static final " + re.escape(f) + r":", re.M)
-    s, k = pat.subn(".field public static " + f + ":", s)
+    # baksmali 2.5.2 voi --api 37 in them co an (whitelist/blacklist/greylist)
+    # giua "final" va ten field, nen regex cu "final BRAND:" khong bao gio khop.
+    pat = re.compile(r"^\.field public static final ((?:[a-z][a-z0-9\-]* )*)" + re.escape(f) + r":", re.M)
+    s, k = pat.subn(lambda m: ".field public static " + m.group(1) + f + ":", s)
     n += k
 
 open(path, "w", encoding="utf-8", newline="\n").write(s)
@@ -1142,7 +1147,9 @@ def add_hook(m):
             + "\n\n    invoke-static {%s}, Lcom/bugos/spoof/AppSpoof;->apply(Landroid/content/Context;)V"
               "\n\n    # %s" % (ctx, MARK))
 
-pat = re.compile(r"\.method public (?:static )?newApplication\([^\n]*\n(.*?)\.end method", re.S)
+# baksmali chen co an (whitelist/blacklist/...) sau "public static" nen phai
+# cho phep moi token truoc ten method.
+pat = re.compile(r"\.method public [^(\n]*newApplication\([^\n]*\n(.*?)\.end method", re.S)
 total = 0
 
 def fix_method(m):
@@ -1474,6 +1481,9 @@ patch_services() {
   apply_services_signature_patches "$decompile_dir"
   apply_a17_extra_services "$decompile_dir"
   inject_windowstate_bypass_stub "$decompile_dir"
+
+  # Cho phép chụp màn hình ở app có FLAG_SECURE (ngân hàng, DRM...)
+  apply_no_secure_windows "$decompile_dir"
   #apply_services_disable_secure_flag "$decompile_dir"
 
   # Apply invoke-custom patches (common to all features)
