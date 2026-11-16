@@ -85,15 +85,6 @@ def get_rom_size():
         return f"{size / 1024 ** 3:.1f} GB"
     return f"{size / 1024 ** 2:.0f} MB"
 
-def get_toolbox_mode():
-    """Đọc toolbox_mode trong config.env để thông báo biết bản nào."""
-    for line in read_file_if_exists("config.env").splitlines():
-        line = line.strip()
-        if line.startswith("toolbox_mode="):
-            return line.split("=", 1)[1].strip()
-    return ""
-
-
 def get_device_model():
     for path in ("bin/ddevice/device_name.txt", "bin/ddevice/name_devices.txt"):
         val = read_file_if_exists(path)
