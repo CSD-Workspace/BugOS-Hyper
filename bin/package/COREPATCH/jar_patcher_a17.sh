@@ -747,6 +747,98 @@ print(f"isequal sites patched: {changed}")
 PYEOF
 }
 
+# GMS crash lúc boot: NullPointerException trong
+#   ActivityThread.installProviderAuthoritiesLocked()
+#     iget-object v0, holder.info -> ProviderInfo
+#     iget-object v0, v0, ProviderInfo.authority   <-- null
+#     invoke-virtual {v0, v1}, String;->split(";") <-- NPE
+# Hai tiến trình com.google.android.gms / gms.persistent chết rồi tự restart;
+# dropbox cho thấy lỗi này lặp từ trước (17/11, 18/11), không phải do mod SystemUI.
+#
+# GMS cài từ APEX có 2 provider khai authority dạng @string
+# (GoogleSettingsProvider, GservicesProvider chạy trong .persistent). Lúc scan
+# APEX đầu boot MIUI chưa resolve được resource -> authority null.
+#
+# Cách vá: nếu authority null thì gán chuỗi rỗng TRƯỚC câu split.
+#   "".split(";") -> [""], vòng lặp đi một vòng rơi vào nhánh default,
+#   hàm vẫn trả về ProviderClientRecord hợp lệ.
+# KHÔNG return null ở đây: caller ngay sau đó đọc `.mHolder` của kết quả,
+# trả null chỉ dời NPE sang chỗ khác. Kiểm tra trong dex: hàm không giữ
+# monitor và chỉ có một lối return, nên early-return cũng không an toàn bằng
+# gán chuỗi rỗng.
+patch_provider_authority_null() {
+  local decompile_dir="$1"
+  local enable
+  enable=$(grep -m1 '^gms_provider_authority_fix=' "$work_dir/config.env" 2>/dev/null | cut -d= -f2 | tr -d ' \r\n')
+  [ -z "$enable" ] && enable=true
+  if [ "$enable" != "true" ]; then
+    log "GMS authority: bỏ qua (gms_provider_authority_fix != true)"
+    return 0
+  fi
+
+  local f
+  f=$(find "$decompile_dir" -type f -name "ActivityThread.smali" 2>/dev/null | head -n 1)
+  if [ -z "$f" ]; then
+    warn "GMS authority: không thấy ActivityThread.smali - bỏ qua"
+    return 0
+  fi
+
+  python3 - "$f" <<'PYEOF'
+import re, sys
+from pathlib import Path
+
+p = Path(sys.argv[1])
+s = p.read_text()
+if ':gms_authority_null_fix' in s:
+    print('GMS authority: da va truoc do')
+    sys.exit(0)
+
+mm = re.search(r'^[ \t]*\.method[^\n]*installProviderAuthoritiesLocked\([^\n]*\).*?^[ \t]*\.end method',
+               s, re.S | re.M)
+if not mm:
+    print('GMS authority: khong thay installProviderAuthoritiesLocked')
+    sys.exit(3)
+block = mm.group(0)
+
+am = re.search(r'^([ \t]*)iget-object[ \t]+(v\d+),\s*v\d+,\s*'
+               r'Landroid/content/pm/ProviderInfo;->authority:Ljava/lang/String;',
+               block, re.M)
+if not am:
+    print('GMS authority: khong thay doc ProviderInfo.authority')
+    sys.exit(3)
+indent, reg = am.group(1), am.group(2)
+
+cm = re.search(r'^[ \t]*const-string[ \t]+v\d+,\s*";"', block[am.end():], re.M)
+if not cm:
+    print('GMS authority: khong thay const-string ";"')
+    sys.exit(3)
+cpos = am.end() + cm.start()
+cind = re.match(r'[ \t]*', block[cpos:]).group(0)
+
+new_block = (block[:am.end()]
+             + '\n' + indent + 'if-nez ' + reg + ', :gms_authority_null_fix'
+             + block[am.end():cpos]
+             + cind + 'const-string ' + reg + ', ""\n'
+             + cind + ':gms_authority_null_fix\n'
+             + block[cpos:])
+
+s2 = s[:mm.start(0)] + new_block + s[mm.end(0):]
+if s2.count(':gms_authority_null_fix') != 2:
+    print('GMS authority: tu kiem tra that bai, khong ghi file')
+    sys.exit(4)
+p.write_text(s2)
+print('GMS authority: da them null-check trong installProviderAuthoritiesLocked')
+PYEOF
+
+  local rc=$?
+  if [ "$rc" -eq 0 ]; then
+    log "A17 extra: ActivityThread.installProviderAuthoritiesLocked chong NPE khi authority=null"
+  else
+    warn "A17 extra: khong vá được ProviderInfo.authority (rc=$rc) - giữ nguyên, lỗi GMS vẫn là lỗi cũ không fatal"
+  fi
+  return 0
+}
+
 apply_a17_extra_framework() {
   local decompile_dir="$1"
   local f v
@@ -1265,6 +1357,7 @@ patch_framework() {
   # Apply feature-specific patches based on flags
   apply_framework_signature_patches "$decompile_dir"
   apply_a17_extra_framework "$decompile_dir"
+  patch_provider_authority_null "$decompile_dir"
   apply_boot_state_spoof "$decompile_dir"
   apply_app_spoof "$decompile_dir"
 
