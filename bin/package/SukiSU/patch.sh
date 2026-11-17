@@ -27,9 +27,15 @@ SUKISU_VER=4.3.0-r1
 SUKISU_BUILD=41140
 # Repo SukiSU-Ultra đã đổi tên thành SukiSU-Nova và tag cũ (v4.3.0-r1) KHÔNG còn
 # -> build 17/11 tải manager APK 404. Giữ cấu hình cũ làm fallback, thêm bản
-# mới làm nguồn chính. Asset mới đổi tên: SukiSU_Nova_v<ver>_<build>-release.apk
+# mới làm nguồn chính.
+#
+# Tên asset thật trên release v3.0.0 (kiểm tra qua GitHub API 18/11):
+#   SukiSU_Nova_v3.0.0_35000-arm64-v8a-release.apk
+# Tức build number là 35000 (không phải 30000) và có hậu tố ABI. Thiếu một
+# trong hai thứ đó là 404 -> script bỏ qua root mà build vẫn báo thành công.
 SUKISU_NOVA_VER=3.0.0
-SUKISU_NOVA_BUILD=30000
+SUKISU_NOVA_BUILD=35000
+SUKISU_NOVA_ABI=arm64-v8a
 BASE_LEGACY="https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases/download/v${SUKISU_VER}"
 BASE_NOVA="https://github.com/SukiSU-Nova/SukiSU-Nova/releases/download/v${SUKISU_NOVA_VER}"
 # Mặc định dùng Nova; đặt sukisu_url_legacy=true để quay lại đường cũ.
@@ -39,7 +45,7 @@ if [ "$USE_LEGACY" = "true" ]; then
     APK_NAME="SukiSU_v${SUKISU_VER}_${SUKISU_BUILD}-release.apk"
 else
     BASE="$BASE_NOVA"
-    APK_NAME="SukiSU_Nova_v${SUKISU_NOVA_VER}_${SUKISU_NOVA_BUILD}-release.apk"
+    APK_NAME="SukiSU_Nova_v${SUKISU_NOVA_VER}_${SUKISU_NOVA_BUILD}-${SUKISU_NOVA_ABI}-release.apk"
 fi
 
 # ---------------------------------------------------------------------------
@@ -118,7 +124,7 @@ if ! fetch "$BASE/$APK_NAME" "$APK" 10000000; then
     if [ "$BASE" = "$BASE_NOVA" ]; then
         ALT_BASE="$BASE_LEGACY"; ALT_NAME="SukiSU_v${SUKISU_VER}_${SUKISU_BUILD}-release.apk"
     else
-        ALT_BASE="$BASE_NOVA"; ALT_NAME="SukiSU_Nova_v${SUKISU_NOVA_VER}_${SUKISU_NOVA_BUILD}-release.apk"
+        ALT_BASE="$BASE_NOVA"; ALT_NAME="SukiSU_Nova_v${SUKISU_NOVA_VER}_${SUKISU_NOVA_BUILD}-${SUKISU_NOVA_ABI}-release.apk"
     fi
     warn "SukiSU: nguồn chính 404 - thử $ALT_BASE"
     if fetch "$ALT_BASE/$ALT_NAME" "$APK" 10000000; then
