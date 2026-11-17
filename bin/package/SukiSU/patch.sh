@@ -25,7 +25,22 @@ source "$work_dir/functions.sh"
 
 SUKISU_VER=4.3.0-r1
 SUKISU_BUILD=41140
-BASE="https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases/download/v${SUKISU_VER}"
+# Repo SukiSU-Ultra đã đổi tên thành SukiSU-Nova và tag cũ (v4.3.0-r1) KHÔNG còn
+# -> build 17/11 tải manager APK 404. Giữ cấu hình cũ làm fallback, thêm bản
+# mới làm nguồn chính. Asset mới đổi tên: SukiSU_Nova_v<ver>_<build>-release.apk
+SUKISU_NOVA_VER=3.0.0
+SUKISU_NOVA_BUILD=30000
+BASE_LEGACY="https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases/download/v${SUKISU_VER}"
+BASE_NOVA="https://github.com/SukiSU-Nova/SukiSU-Nova/releases/download/v${SUKISU_NOVA_VER}"
+# Mặc định dùng Nova; đặt sukisu_url_legacy=true để quay lại đường cũ.
+USE_LEGACY=$(grep -m1 '^sukisu_url_legacy=' "$work_dir/config.env" 2>/dev/null | cut -d= -f2 | tr -d ' \r\n')
+if [ "$USE_LEGACY" = "true" ]; then
+    BASE="$BASE_LEGACY"
+    APK_NAME="SukiSU_v${SUKISU_VER}_${SUKISU_BUILD}-release.apk"
+else
+    BASE="$BASE_NOVA"
+    APK_NAME="SukiSU_Nova_v${SUKISU_NOVA_VER}_${SUKISU_NOVA_BUILD}-release.apk"
+fi
 
 # ---------------------------------------------------------------------------
 # ksud chạy trên HOST: mượn của KernelSU-Next 3.4.2.
@@ -93,11 +108,26 @@ fetch() {
 }
 
 KSUSD="$CACHE/ksud"
-APK_NAME="SukiSU_v${SUKISU_VER}_${SUKISU_BUILD}-release.apk"
+# APK_NAME đã được quyết định ở khối cấu hình phía trên (Nova / legacy).
 APK="$CACHE/$APK_NAME"
 
 fetch "$KSUD_BASE/ksud-x86_64-unknown-linux-musl" "$KSUSD" 5000000 || { error "SukiSU: không tải được ksud host"; exit 1; }
-fetch "$BASE/$APK_NAME" "$APK" 10000000 || { error "SukiSU: không tải được manager APK ($APK_NAME)"; exit 1; }
+if ! fetch "$BASE/$APK_NAME" "$APK" 10000000; then
+    # Nguồn chính hỏng -> thử nguồn còn lại trước khi bỏ cuộc (repo đã từng đổi
+    # tên SukiSU-Ultra -> SukiSU-Nova, làm tag cũ biến mất).
+    if [ "$BASE" = "$BASE_NOVA" ]; then
+        ALT_BASE="$BASE_LEGACY"; ALT_NAME="SukiSU_v${SUKISU_VER}_${SUKISU_BUILD}-release.apk"
+    else
+        ALT_BASE="$BASE_NOVA"; ALT_NAME="SukiSU_Nova_v${SUKISU_NOVA_VER}_${SUKISU_NOVA_BUILD}-release.apk"
+    fi
+    warn "SukiSU: nguồn chính 404 - thử $ALT_BASE"
+    if fetch "$ALT_BASE/$ALT_NAME" "$APK" 10000000; then
+        BASE="$ALT_BASE"; APK_NAME="$ALT_NAME"
+    else
+        error "SukiSU: không tải được manager APK (cả 2 nguồn) - bỏ qua root, build tiếp"
+        exit 0
+    fi
+fi
 chmod 0755 "$KSUSD"
 mods "SukiSU: manager $APK_NAME"
 
@@ -262,7 +292,7 @@ elif [ -d "$IMG/product" ]; then
         warn "SukiSU: lib lớn nhất chỉ $big_sz byte - có thể thiếu ksud, manager sẽ báo 'chưa cài đặt'"
     fi
     mods "SukiSU: lib arm64 -> product/app/SukiSUUltra/lib/arm64 ($lib_count file, lớn nhất $big)"
-    mods "SukiSU: manager v$SUKISU_VER -> product/app/SukiSUUltra"
+    mods "SukiSU: manager $APK_NAME -> product/app/SukiSUUltra"
 else
     warn "SukiSU: không thấy product/ - manager không được cài sẵn"
 fi

@@ -637,13 +637,33 @@ patch_settings_apk() {
     fi
 
     # ---- Preferences: BugOS Toolbox (ngôn ngữ, theme, spoof, hiệu năng) ----
+    # CẢNH BÁO (đo trên build thật 17/11): KHỐI NÀY PHẢI TẮT MẶC ĐỊNH.
+    #
+    # APKEditor (ARSCLib 1.3.5) KHÔNG tạo được entry resource kiểu "values"
+    # (string, string-array) khi build lại. Đã thử đủ cách, đều báo:
+    #     ERROR: Undefined entry name: <string-array name="bugos_perf_entries"/>...
+    #   - thêm file arrays_bugos.xml vào res/values-*        -> FAIL
+    #   - thêm vào arrays.xml có sẵn                          -> FAIL
+    #   - khai báo ID trong public.xml (đúng type id 0x7f03)  -> FAIL
+    #   - thêm file values mới (kể cả chỉ 1 string ASCII)     -> FAIL
+    # Trong khi đó: SỬA array có sẵn thì OK, THÊM drawable mới thì OK
+    # (kiểm chứng cùng một APK) -> giới hạn nằm ở loại resource values.
+    #
+    # Hậu quả khi bật: rebuild Settings thất bại -> "giữ APK gốc" -> MẤT TOÀN BỘ
+    # bản vá Settings (icon Toolbox, menu Toolbox, logo BugOS, đổi version).
+    # Vì vậy mặc định TẮT. Bật lại bằng settings_bugos_prefs=true khi có công cụ
+    # resource khác (aapt2 link toàn phần) thay được APKEditor.
+    local BUGOS_PREFS
+    BUGOS_PREFS=$(grep -m1 '^settings_bugos_prefs=' "$WORK_DIR/config.env" 2>/dev/null | cut -d= -f2 | tr -d ' \r\n')
+    [ -z "$BUGOS_PREFS" ] && BUGOS_PREFS=false
+
     local bugos_prefs_ok=0
     local bugos_src_dir="$SRC_DIR/../Settings_ZBugOSToolbox"
     local prefs_xml="$bugos_src_dir/prefs_bugos.xml"
     local arrays_xml="$bugos_src_dir/arrays_bugos.xml"
     local receiver_smali="$bugos_src_dir/BugOSBootReceiver.smali"
 
-    if [ -f "$prefs_xml" ] && [ -f "$arrays_xml" ] && [ -f "$receiver_smali" ]; then
+    if [ "$BUGOS_PREFS" = "true" ] && [ -f "$prefs_xml" ] && [ -f "$arrays_xml" ] && [ -f "$receiver_smali" ]; then
         # 1. Thêm arrays_bugos.xml vào các thư mục values
         while IFS= read -r values_dir; do
             [ -n "$values_dir" ] || continue
