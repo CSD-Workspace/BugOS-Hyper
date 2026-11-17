@@ -19,6 +19,13 @@ Quy trình (bash điều phối, python chỉ lo phần zip):
 
 Dex được ghi ở dạng STORED và canh 4 byte (yêu cầu của ART khi mmap), tính cả
 extra field nên không phụ thuộc zipalign bên ngoài.
+
+resources.arsc LUÔN được ghi STORED + canh 4 byte. Từ Android 11 (targetSdk >= 30)
+PackageManager từ chối thẳng thư mục priv-app nếu arsc bị nén:
+    "Targeting R+ (version 30 and above) requires the resources.arsc of installed
+     APKs to be stored uncompressed and aligned on a 4-byte boundary"
+Đây chính là lỗi làm SystemUI biến mất khỏi danh sách package (mất status bar /
+nav bar, reboot) sau khi repack bằng `zip -r` - nén lại toàn bộ entry.
 """
 import os
 import re
@@ -29,6 +36,8 @@ import zipfile
 DEX_RE = re.compile(r'^classes(\d*)\.dex$')
 ALIGN = 4
 EXTRA_ID = 0xD935  # id tự chọn, không xung đột với các extra field phổ biến
+# Bắt buộc STORED với targetSdk >= 30, không phụ thuộc bản gốc nén hay không.
+FORCE_STORED = frozenset(('resources.arsc', 'AndroidManifest.xml'))
 
 
 def list_dex(zf):
@@ -81,13 +90,17 @@ def cmd_repack(apk, workdir, outapk):
 
     tmp = outapk + '.tmp'
     replaced = 0
+    written = set()
     with zipfile.ZipFile(apk) as zin, zipfile.ZipFile(tmp, 'w') as zout:
         for info in zin.infolist():
             is_dex = info.filename in newdex
-            # Giữ nguyên kiểu nén của entry gốc; riêng dex thì luôn STORED.
+            # Giữ nguyên kiểu nén của entry gốc; dex + resources.arsc +
+            # AndroidManifest.xml thì luôn STORED (xem FORCE_STORED).
             # Entry STORED phải được canh lại: kích thước dex đổi làm lệch offset
             # của mọi entry phía sau, và resources.arsc / .so cần canh đúng.
-            store = is_dex or info.compress_type == zipfile.ZIP_STORED
+            store = (is_dex
+                     or info.filename in FORCE_STORED
+                     or info.compress_type == zipfile.ZIP_STORED)
             align = 4096 if info.filename.endswith('.so') else ALIGN
 
             data = newdex[info.filename] if is_dex else zin.read(info.filename)
@@ -100,8 +113,22 @@ def cmd_repack(apk, workdir, outapk):
                 zi.extra = _aligned_extra(
                     offset, len(info.filename.encode('utf-8')), align)
             zout.writestr(zi, data)
+            written.add(info.filename)
             if is_dex:
                 replaced += 1
+
+        # dex có trong workdir nhưng KHÔNG có trong APK gốc -> chèn vào cuối.
+        # Cần cho trường hợp phục hồi một APK đã bị mất dex (xem SystemUI.sh:
+        # bản build cũ xoá classes.dex/classes2.dex rồi không ghi lại).
+        for name in sorted(newdex):
+            if name in written:
+                continue
+            zi = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            zi.compress_type = zipfile.ZIP_STORED
+            zi.external_attr = 0o644 << 16
+            zi.extra = _aligned_extra(zout.fp.tell(), len(name.encode('utf-8')))
+            zout.writestr(zi, newdex[name])
+            replaced += 1
 
     if replaced == 0:
         os.unlink(tmp)
