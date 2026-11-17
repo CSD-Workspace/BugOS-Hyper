@@ -124,7 +124,10 @@ if [ ! -s "$OUT" ]; then
     exit 0
 fi
 
-cp -f "$OUT" "$APK" && log_msg "SystemUI: đã thay APK trong ROM (whitelist thông báo đã tắt)"
+# TẮT TẠM: cp -f "$OUT" "$APK" && log_msg "SystemUI: đã thay APK trong ROM (whitelist thông báo đã tắt)"
+# SystemUI patch gây bootloop trên annibale OS4.0.6/Android 17 (RescueParty,com.android.systemui).
+# Giữ SystemUI nguyên bản cho đến khi xác định lại cách inject smali an toàn.
+warn_msg "SystemUI: BO QUA patch USE_WHITE_LISTS (tat tam, tranh bootloop)"
 
 rm -rf "$DEC"
 rm -f "$OUT"
