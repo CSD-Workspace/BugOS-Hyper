@@ -604,11 +604,19 @@ patch_settings_apk() {
     mods "Settings: drawable=$total  string=$strings_done"
 
     # ---- Icon mục Toolbox ------------------------------------------------
-    # Thay drawable ic_other_advanced_settings bằng icon riêng.
-    # Drawable này chỉ được 4 file XML của mục Toolbox tham chiếu (đã kiểm tra
-    # trực tiếp trên Settings.apk: settings_headers + top_level_settings*), nên
-    # đổi không ảnh hưởng mục nào khác. Có cả bản drawable-night-v8 nên phải
-    # thay hết mọi biến thể tìm được.
+    # Icon RIÊNG (không ghi đè ic_other_advanced_settings nữa - bản cũ làm mục
+    # "Cài đặt bổ sung" mất icon gốc). Copy cùng tên vào mọi thư mục drawable*
+    # để đủ biến thể mật độ/night.
+    #
+    # BẮT BUỘC khai báo tên resource trong public.xml, nếu không APKEditor báo:
+    #     ERROR: Local resource not defined: @drawable/ic_bugos_toolbox,
+    #            for path: res/drawable/ic_bugos_toolbox.xml
+    # -> rebuild Settings thất bại -> giữ APK gốc -> mất toàn bộ bản vá.
+    # (Đo trên Settings.apk thật: thêm file + ID vào public.xml thì build OK,
+    #  resources.arsc có 0x7f0818ed drawable/ic_bugos_toolbox, 40 biến thể.)
+    #
+    # Chỉ khai báo ĐÚNG MỘT lần cho tên resource: các bản drawable-<qualifier>
+    # là biến thể của cùng entry, không phải entry mới.
     local tb_icon="$SRC_DIR/ic_bugos_toolbox.xml"
     if [ -f "$tb_icon" ]; then
         local tb_n=0 d
@@ -618,6 +626,46 @@ patch_settings_apk() {
         done < <(find "$out" -path '*/res/drawable*' -type d 2>/dev/null)
         if [ "$tb_n" -gt 0 ]; then
             mods "Settings: them drawable ic_bugos_toolbox -> $tb_n thu muc"
+            python3 - "$out" <<'PYEOF'
+import io, os, re, sys
+
+out = sys.argv[1]
+name = 'ic_bugos_toolbox'
+pubs = []
+for root, _dirs, files in os.walk(out):
+    if 'public.xml' not in files:
+        continue
+    if os.path.basename(os.path.dirname(root)) == 'res' and os.path.basename(root) == 'values':
+        pubs.append(os.path.join(root, 'public.xml'))
+
+if not pubs:
+    print('  [WARN] khong thay public.xml - icon se thieu resource')
+    raise SystemExit(0)
+
+for p in pubs:
+    s = io.open(p, encoding='utf-8', errors='replace').read()
+    if 'name="%s"' % name in s:
+        continue
+    # type id của drawable lấy từ entry có sẵn (không hardcode: 0x7f08 ở
+    # Settings này, nhưng có thể khác ở ROM khác).
+    m = re.search(r'<public id="(0x7f[0-9a-f]{2})[0-9a-f]{4}" type="drawable"', s)
+    if not m:
+        print('  [WARN] public.xml khong co drawable nao de suy ra type id')
+        continue
+    tid = m.group(1)
+    ids = [int(x, 16) for x in
+           re.findall(r'<public id="(%s[0-9a-f]{4})" type="drawable"' % tid, s)]
+    if not ids:
+        continue
+    nxt = max(ids) + 1
+    if nxt > int(tid + 'ffff', 16):
+        print('  [WARN] het id trong type drawable %s' % tid)
+        continue
+    entry = '  <public id="0x%08x" type="drawable" name="%s" />\n' % (nxt, name)
+    s = s.replace('</resources>', entry + '</resources>')
+    io.open(p, 'w', encoding='utf-8', newline='\n').write(s)
+    print('  [OK] khai bao drawable %s = 0x%08x trong public.xml' % (name, nxt))
+PYEOF
         else
             warn "Settings: khong thu muc drawable de them icon"
         fi
